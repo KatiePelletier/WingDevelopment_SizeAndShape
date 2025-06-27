@@ -274,3 +274,13 @@ plot(predictorEffects(defect.cellsize.mod2, ~ tricomeSexC,
                y=list(type="response")),
      lines=list(multiline=TRUE, z.var = "logCSsexC")
 )
+
+#also want to ask if variation among regions is a good predictor.
+#still a whole lot of nothing to see here. 
+
+#keeping the two way interactions here. 
+defect.cellsizeVar.mod <- glm(defect ~ (logCSsexC + sex.x + tricomeSexC + tricome_cv)^2, 
+                            data = zi418ef43.catDat2, family = binomial(link = "logit"))
+
+summary(defect.cellsizeVar.mod)
+Anova(defect.cellsizeVar.mod)
