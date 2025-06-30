@@ -8,6 +8,7 @@ library(car)
 library(emmeans)
 library(effects)
 library(broom)
+library(geomorph)
 
 #reading in the data. In three diffrent files. I will read in a clip then combine the data 
 #this is just the phenotype of those wings. Genotype, sex, and scoring for 4 phenotypes (bianary): pcvl, acvl, extra vein, loss/shorter logintudinal vein. 
@@ -114,7 +115,7 @@ zi418ef43.catDat <- (zi418ef43_wings %>%
                        #because the data is identical and repeated for every observation, I can just take                         any match.
                        left_join(zi418ef43_wings, multiple = "any") %>%
                        #dropping the tricome count and wing region col because this doesn't reflect reality
-                       select(-c("tricomeCount", "wingRegion")) %>% 
+                       dplyr::select(-c("tricomeCount", "wingRegion")) %>% 
                        #annoying data cleanup to match the wing defect flyID 
                        mutate(flyID = paste(plate, fly, sep = "_")) %>% 
                        #joining in the defect data 
@@ -151,10 +152,8 @@ summary(defect.size.mod)
 Anova(defect.size.mod)
 
 
-plot(emtrends(defect.size.mod, ~ sex.x|logCSc))
+plot(emtrends(defect.size.mod, ~ sex.x, var = "logCSc"))
 
-
-plot(emtrends(defect.size.mod))
 
 #to for the males being more likley than females to have a defect 
 #the log odds ratio is pretty small, and the conf int crosses 0. 
@@ -284,3 +283,161 @@ defect.cellsizeVar.mod <- glm(defect ~ (logCSsexC + sex.x + tricomeSexC + tricom
 
 summary(defect.cellsizeVar.mod)
 Anova(defect.cellsizeVar.mod)
+
+
+
+#now I want to do something with shape. 
+#Do I want to also centre shape? Will that matter?
+
+
+#To remind myself, because I haven't worked with this data in years, I am going to take the normal data and do a PCA and just look at it for a second before I decide what to do with the analysis. 
+
+wing.pca <- prcomp(zi418ef43.catDat2[,14:109])
+
+wing.pca.df <- data.frame(zi418ef43.catDat2, wing.pca$x[,1:56])
+
+#so sex is PC1, which is also size, (probably driving a lot of this) 
+ggplot(wing.pca.df) + 
+  geom_point(aes(x = PC1, y = PC2, col = sex.x))
+
+ggplot(wing.pca.df) + 
+  geom_point(aes(y = PC1, x = logCS, col = sex.x))
+
+
+#what if I just include size in the PCA 
+
+wing.pca2 <- prcomp(zi418ef43.catDat2[,c(14:109, 125)])
+
+wing.pca.df2 <- data.frame(zi418ef43.catDat2, wing.pca2$x[,1:57])
+
+
+#good. 
+ggplot(wing.pca.df2) + 
+  geom_point(aes(y = PC1, x = logCS, col = sex.x))
+
+
+#this looks better in terms of the sex differences. 
+ggplot(wing.pca.df2) + 
+  geom_point(aes(x = PC2, y = PC3, col = sex.x))
+
+ggplot(wing.pca.df2) + 
+  geom_point(aes(x = PC4, y = PC5, col = sex.x))
+
+ggplot(c) + 
+  geom_point(aes(x = PC6, y = PC7, col = sex.x))
+#seems fine to me. 
+
+#A nicer scree plot. 
+#ths ovi looks crazy 
+data.frame(sdev = wing.pca2$sdev,
+           PC = seq(1:length(wing.pca2$sdev))) %>% 
+  ggplot(aes(x =as.factor(PC), y = sdev)) + 
+    geom_col()
+
+
+#this drops 1 
+data.frame(sdev = wing.pca2$sdev,
+           PC = seq(1:length(wing.pca2$sdev))) %>% 
+  filter(PC != 1) %>% 
+  ggplot(aes(x =as.factor(PC), y = sdev)) + 
+  geom_col()
+
+#this keeps to 57 (the total avail dems)
+#the us unfortunately no super clear cut off here that I would use for the stats :(
+data.frame(sdev = wing.pca2$sdev,
+           PC = seq(1:length(wing.pca2$sdev))) %>% 
+  filter(PC > 1 & PC <= 57) %>% 
+  ggplot(aes(x =as.factor(PC), y = sdev)) + 
+  geom_col()
+
+#I don't really want to have to have all 56 dimentions as predictors, that is crazy. I am going to start with the first 3 and see if there is an assosiation. 
+
+
+#should I also have the cell size stuff in here? 
+#No interactions because I think all these effects are perpendicular by definition. 
+shape.defect.mod <- glm(defect ~ logCSsexC + PC2 + PC3 + PC4, 
+                        data = wing.pca.df2, family = binomial(link = "logit"))
+
+
+
+#what do I do with missing landmarks? 
+summary(shape.defect.mod)
+
+#so there is an effect of shape but I need to remember how shape works when these things are missing. I should just drop the crossvein landmarks and recheck this result
+#For the most part, these are not compleate losses and I guessed where the intersections would be.
+Anova(shape.defect.mod)
+
+#I actually thought this was way more focused on cvl cases. 
+wing.pca.df2 %>% 
+  group_by(sex.x) %>% 
+  summarize(acvl = sum(acvl, na.rm = T), 
+            pcvl = sum(pcvl, na.rm = T), 
+            log.vein.loss = sum(log.vein.loss, na.rm = T),
+            extra.vein = sum(extra.vein, na.rm = T))
+
+wing.pca.df2 %>% 
+  group_by(sex.x) %>% 
+  summarize(acvl = sum(acvl, na.rm = T)/n(), 
+            pcvl = sum(pcvl, na.rm = T)/n(), 
+            log.vein.loss = sum(log.vein.loss, na.rm = T)/n(),
+            extra.vein = sum(extra.vein, na.rm = T)/n())
+
+
+#I thought I would plot the shape change along PC2 and PC3. 
+
+#I need a mean shape 
+
+#colMeans would have been a better idea here. But this is what came to my mind first. 
+m <- colMeans(wing.pca.df2[,14:109])
+
+#putting this into a matrix. 
+#I made this for myself before 
+#why are the first and last number 0? ths
+vec2matrix <- function(x) {
+  y <- unlist(x)
+  m <- matrix(y, nrow = 48, ncol = 2, byrow = TRUE)
+}
+
+m2 <- vec2matrix(m)
+
+#PC2
+#tried with 2sd and then went with 3 to make the visualization easier/not have to mess with mag to see. 
+#3 * sdev of PC *  rotation
+pc2eff <- 3 * wing.pca2$sdev[2] * wing.pca2$rotation[,2]
+
+pc2effM <- m2 + vec2matrix(pc2eff[1:48])
+
+
+#this contains the winglinks needed for plotting 
+source("KP_geomorphwingfunctions.R")
+
+#PC2 is pretty subtle and mostly associated with the lm that would be missing in the weird ones. But there is also something weird going on with the top margin. 
+plotRefToTarget(m2, pc2effM , 
+                method = "points", 
+                links = wing.links,
+                mag = 1, 
+                gridPars = wing.spec)
+
+
+#PC3
+pc3eff <- 3 * wing.pca2$sdev[3] * wing.pca2$rotation[,3]
+
+pc3effM <- m2 + vec2matrix(pc3eff[1:48])
+
+
+plotRefToTarget(m2, pc3effM , 
+                method = "points", 
+                links = wing.links,
+                mag = 1, 
+                gridPars = wing.spec)
+
+
+#I am not convinced that the effect is just that those are the landmarks affected by the loss. I need to go back and look at the images. 
+
+
+
+#Ideas to go forward with shape analysis:
+#1 drop landmarks associated with the loss for each case (probably removes the most variable landmarks)
+#Go back and annotate which landmarks are actually missing in these images. Mark these with NA. 
+#I can't remove those animals from the analysis and having NAs makes doing the PCA impossible. 
+#I can remove the landmark that is NA from the entire dataset. This is the most conservative option. 
